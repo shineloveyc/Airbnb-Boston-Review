@@ -1,0 +1,436 @@
+---
+title: "TeamD_Case4"
+author: "Shine, Jason Meng, Tianyu Zhang, Lingyi Kong"
+date: "4/3/2018"
+output:
+  word_document: default
+  html_document:
+    df_print: paged
+---
+## Load the packages
+```{r, echo=FALSE, warning=FALSE}
+library(tm)
+library(tidytext)
+library(tidyverse)
+library(rJava)
+library(qdap)
+library(RWeka)
+library(ggplot2)
+library(NLP)
+library(ggthemes)
+library(RGraphics)
+library(gridExtra)
+library(wordcloud)
+library(magrittr)
+library(igraph)
+library(SnowballC)
+```
+
+## Data Prep
+
+```{r,echo=FALSE, warning=FALSE}
+#set seeds
+set.seed(1234)
+
+#load the data
+Airbnb_DF <- read.csv("reviews.csv", encoding = "latin -1", stringsAsFactors = FALSE)
+str(Airbnb_DF)
+
+#checking total missing data
+sapply(Airbnb_DF,function(x) sum(is.na(x)))
+
+#random sample 1200 obs
+sample_index <- sample(nrow(Airbnb_DF), 1200)
+Airbnb_DF_subset <- Airbnb_DF[sample_index,]
+
+```
+### Interpration:
+Our first step is to load the Airbub dataset and set stringAsFactors as False. This can efficiently prevents conversion of string to factors and treats them as vectors. Then we check the dataset by scanning its structure(str function).
+Missing data can be a serious problem as we process data, so our next step is to check total missing data. Fortunately, we found that there is no missing data in this reviews file.
+Following the instruction, we then select a random subset of 1,200 reviews from the dataset to facilicate our further analysis.
+
+## Data Analysis
+```{r, echo=FALSE, warning=FALSE}
+#create an overall polarity object
+review_pol <- polarity(Airbnb_DF_subset$comments)
+review_pol
+
+#Organzie and clean data
+##Add a polarity column
+Airbnb_DF_subset_with_pol <- Airbnb_DF_subset %>% mutate(polarity = review_pol$all$polarity)
+
+#subset positive comments
+pos_comments <- Airbnb_DF_subset_with_pol %>%
+  filter(polarity > 0) %>%
+  pull(comments)
+
+#subeset negative comments
+neg_comments <- Airbnb_DF_subset_with_pol %>%
+  filter(polarity < 0) %>%
+  pull(comments)
+
+# Paste and collapse the positive comments
+pos_terms <- paste(pos_comments, collapse = " ")
+
+# Paste and collapse the negative comments
+neg_terms <- paste(neg_comments, collapse = " ")
+
+# Concatenate the terms
+all_terms <- c(pos_terms, neg_terms)
+
+# Pipe a VectorSource Corpus
+all_corpus <- all_terms %>% 
+  VectorSource() %>% 
+  VCorpus()
+  
+#Create the toSpace content transformer
+toSpace <- content_transformer(function(x, pattern) {return (gsub(pattern," ",
+x))})
+
+# Apply it for substituting the regular expression given in one of the former answers by " "
+clean_corpus<- tm_map(all_corpus,toSpace,"[^[:graph:]]")
+
+# the tolower transformation worked!
+clean_corpus <- tm_map(clean_corpus, content_transformer(tolower))
+clean_corpus <- tm_map(clean_corpus, removePunctuation) #remove all punctuation
+clean_corpus <- tm_map(clean_corpus, removeNumbers) # remove numbers
+
+#stemming the dataset
+clean_corpus <- tm_map(clean_corpus, stripWhitespace) # purge extra white space
+clean_corpus <- tm_map(clean_corpus, PlainTextDocument)
+#clean_corpus <- tm_map(clean_corpus, stemDocument)
+
+
+#define the stopwords
+mystopwords <- c(stopwords("en"), "Boston", "really", "highly", "definitely", "stayed", stopwords("de"), "zimmer", "gibt", "in der", "ist sehr", "we had","i would", "haus ist", "the house", "it s", "and i", "s place", "our stay","place was", "for a","would definitely", " minuten", "das haus","die wohnung","von der","zu erreichen","place is", "and very","the city", "and a", "walk to","and we","a very","room was","stay here","the neighborhood","a un","alles war", "an die","ca ","chrome cast","das zimmer","der nachbarschaft","der ubahn","der unterkunft","die kommunikation","die unterkunft","il faut", "il y", "location location","lower the","man hã¶rt","min de","mit der","sheet and","the heat","told to","und die","war insgesamt","war sehr","was man","wenn man", "wir ein","wohnung ist","y a","and it","with the","restaurants and","here again","y el","minuten","neighborhood","city", "gut und", "gut zu", "man hã¶rt")
+
+# Simple TFIDF TDM
+all_tdm <- TermDocumentMatrix(
+  clean_corpus, 
+  control = list(
+    weighting = weightTfIdf, 
+    removePunctuation = TRUE, 
+    removeNumbers = TRUE,
+    stopwords = mystopwords
+  )
+)
+
+#covert to matrix and examine the dimension
+all_tdm_m <- as.matrix(all_tdm)
+dim(all_tdm_m)
+head(all_tdm_m,3)
+
+```
+### Interpretation: 
+Before our major analysis, we first take a look at the overall polarity of the 1200 random samples. As is showed in the results, the average polarity is 0.871, indicating that the samples are quite positive overall. 
+Then we assign the polarity of each comment to a new column "polarity" and according to the polarity values, we use filter to separate comments into positive comments (polarity > 0) and negative comments (polarity < 0). After transforming the dataframes of comments into terms, we combine the terms and then transform into corpus.
+When converting the corpus into a term document matrix(tdm), we remove punctuations, numbers and our customized stopwords, and use TfIdf weighting. Then the tdm is converted into a matrix for the following analysis. The dimension and the first three rows are showed in the result table.
+
+### Discussion about mystopwords:
+* Stopwords:
+*Dimension: #row(5008), #col(2)
+
+## Visualize 15 most frequent single terms
+```{r,echo=FALSE, warning=FALSE}
+# Calculate the rowSums: term_frequency
+term_frequency <- rowSums(all_tdm_m)
+head(term_frequency,3)
+
+# Sort term_frequency in descending order
+term_frequency <- sort(term_frequency, decreasing = TRUE)
+#term_frequency
+# View the top 10 most common words
+term_frequency[1:15]
+
+# Plot a barchart of the 15 most common words
+barplot(term_frequency[1:15], col = "light blue", las = 2, ylab = "TfIdf")
+title(main = list("15 Most Freq Unigrams", font = 4))
+
+```
+### Interpration:
+In order to visualize the 15 most frequent single terms, first we calculate the row sums of the matrix we just created to get the frequency of each term. Then we sort the term frequency in descending order to get a clearer picture for the most common words. We viewed the top 15 most frequent words and created a barchart based on them. 
+Because several words such as "really", "highly", or "definitely" have high frequency of occurrence but low enlightening meaning, so our group delete these "meaningless" words by adding them to stopwords function. After erasing these disturbing words, we generate a clear and meaningful barplot for the 15 most frequent single words.
+From the output we can see that the results are both in English and in German.Gut refers to good in English;haus refers to house in English;wohnug refers to apartment in English;freundlich refers to friendly in English.
+
+## Visualize 15 most frequent bigrams
+```{r,echo=FALSE, warning=FALSE}
+#define term length to 2
+tokenizer <- function(x) 
+  NGramTokenizer(x, Weka_control(min = 2, max = 2))
+
+# Simple TFIDF TDM with 2 words
+all_tdm_2 <- TermDocumentMatrix(
+  all_corpus, 
+  control = list(
+    weighting = weightTfIdf, 
+    removePunctuation = TRUE, 
+    removeNumbers = TRUE,
+    stopwords = mystopwords,
+    tokenizer = tokenizer
+  )
+)
+
+#covert to matrix and examine the dimension
+all_tdm_2_m <- as.matrix(all_tdm_2)
+dim(all_tdm_2_m)
+head(all_tdm_2_m,3)
+
+term_2_frequency <- rowSums(all_tdm_2_m)
+head(term_2_frequency,3)
+
+# Sort term_frequency in descending order
+term_2_frequency <- sort(term_2_frequency, decreasing = TRUE)
+
+# View the top 10 most common words
+term_2_frequency[1:15]
+
+# Plot a barchart of the 15 most common words
+barplot(term_2_frequency[1:15], col = "dark blue", las = 2, ylab = "TfIdf")
+title(main = list("15 Most Freq Bigrams", font = 4))
+
+```
+### Interpretation:
+To plot a barplot of the most frequent bigrams, we set the term length to 2, create a new term document matrix, and convert it to a new matrix. Same as the part of unigrams, we use TfIdf weighting, and remove punctuations, numbers and our customized stopwords. In our first attempt with only one-word stopwords, we find that the stopwords don't work for bigrams and the regular stopwords ,like "der"("the" in Germany), that are deleted in the single-word analysis show up again in the bigram analysis. Most frequent bigrams are like "and I", "der haus"(the house in Germany), "it is" that make little sense. Therefore we add two-word stopwords to our customized stopwords, "mystopwords", so that every bigram in the bar plot provides some information. Then we show the 15 most frequent bigrams and draw a bar chart to show the phrases and their frequencies.
+
+### Comments on the short phrases
+The 15 most frequent meaningful phrases contain 7 English phrases, 7 German phrases and 1 French phrases. Their meanings are "very clean", "very friendly", "walking distance", "very nice", "highly recommend", "was clean", "was perfect", "is calm", "very good", "very light-colored", "very beautiful", "very nice", "great place", "great host", and "perfect for".
+It's obvious that all of the most frequent phrases are positive, indicating that overall Airbnb is a good source of temporary accomodation. When we dig further, we find that the aspects people care most are whether the house/apartment is clean, whether the host is friendly, and how convinient is the house/apartment located.
+The languages of the frequent phrases can also convey some information. The high frequency of German phrases may indicate that either Airbnb is commonly used by German speakers or they are more willingly to leave a comment. 
+
+### Comparison to the single-word analysis
+
+
+##Create a new Corpus
+```{r,echo=FALSE, warning=FALSE}
+#create a new corpus
+myCorpus2 <- VCorpus(VectorSource(Airbnb_DF_subset$comments))
+
+#Create the toSpace content transformer
+#toSpace <- content_transformer(function(x, pattern) {return (gsub(pattern," ", x))})
+# Apply it for substituting the regular expression given in one of the former answers by " "
+#clean_corpus2<- tm_map(myCorpus2,toSpace,"[^[:graph:]]")
+
+# All codes above are for the implemention of stemming. Otherwise there will be an error.
+
+# Cleaning-up
+#clean_corpus2 <- tm_map(clean_corpus2, content_transformer(tolower))
+#clean_corpus2 <- tm_map(clean_corpus2, removePunctuation) #remove all punctuation
+#clean_corpus2 <- tm_map(clean_corpus2, removeNumbers) # remove numbers
+
+#stemming the dataset
+#clean_corpus2 <- tm_map(clean_corpus2, stripWhitespace) # purge extra white space
+#clean_corpus2 <- tm_map(clean_corpus2, PlainTextDocument)
+#clean_corpus2 <- tm_map(clean_corpus2, stemDocument)
+
+# Simple TFIDF DTM
+all_dtm <- DocumentTermMatrix(
+  myCorpus2,  #change to clean_corpus2 if stemming is used
+  control = list(
+    weighting = weightTfIdf,
+    removePunctuation= T,
+    removeNumbers = T,
+    stopwords = mystopwords
+  )
+)
+```
+
+## Visualize word association network for "location"
+```{r, echo= FALSE, warning=FALSE}
+# Word association
+loc_assocs <- findAssocs(all_dtm, "location", 0.055)
+loc_assocs_df <-list_vect2df(loc_assocs)[, 2:3]
+
+# Plot the associations_df values 
+ggplot(loc_assocs_df, aes(y = loc_assocs_df[, 1])) + 
+  geom_point(aes(x = loc_assocs_df[, 2]), 
+             data = loc_assocs_df, size = 3, color = "red") + 
+  xlab("Correlation") + ylab("Term") + ggtitle("Word Association with Location") +
+  theme_gdocs()
+
+# Association network
+word_associate(Airbnb_DF_subset$comments, match.string = c("location"), 
+                stopwords = c(Top200Words, mystopwords), 
+                network.plot = TRUE, cloud.colors = c("gray85", "darkred"))
+
+# Association network with correlation limits
+relations <- data.frame(from = "location", to = loc_assocs_df$X2, weight = loc_assocs_df$X3)
+
+net <- graph.data.frame(relations, direct = T)
+
+plot(net,
+     vertex.color = "light blue",
+     vertex.label.color = "black",
+     edge.color = "grey",
+     vertex.size = 20,
+     vertex.label.cex = 0.6,
+     edge.arrow.size = 0.6,
+     main = "Word Association Network",
+     edge.width = E(net)$weight)
+
+```
+### Interpretation:
+Firstly, we use the findAssocs() function to take a look at the words that are related with "location". We set the correlation to 0.55 to filter the words, so the size of the target word group does not get too big. Then we tried to use the "word_associate" function to create a word netword plot, which appears to be overcomplicated and unrecognizable. Thus, we decided to simplify the plot using basic "plot" function. In this plot, correlation is used to limit the number of words, and the relationship between these major words and "location" is clear. The distance represents the ###### , and the width of the string represents the degree of correlation.
+
+### Comments on the word association plots:
+The reason we decided to create a simplier plot is that we found the nature of the "word_association" function made the network map complicated. We originally planned to use correlation to limit the number of words in the net work map, but again, the "word_association" function did not allow us to do so, since it is designed to take every word from the comments that contains string into the map. The stopwords we have helped to decrease some meaningless words, but the word base is still too big to be presented clearly. Thus, we concluded that the network map has to be complicated in this case, as the nature of the "word_association" function drives. 
+
+## Pyramid plot by using Bing
+```{r, warning=FALSE}
+# Get Bing lexicon
+bing <- get_sentiments("bing")
+
+#change from tdm to tidy format
+all_tidy <- tidy(all_dtm)
+
+#examine the data
+all_tidy[2,]
+
+# Join text to lexicon
+all_terms_bing_words <- inner_join(all_tidy, bing, by = c("term" = "word"))
+
+# Tidy sentiment calculation
+all_tidy_sentiment <- all_terms_bing_words %>% 
+  count(document,term, sentiment, wt = count) %>%
+  spread(sentiment, n, fill = 0) %>%
+  mutate(polarity = positive - negative)  
+
+#get sentiment score for each document
+all_tidy_sentiment <- all_tidy_sentiment %>%
+  group_by(document) %>%
+  summarise(sentiment = sum(polarity))
+
+#subset positive review
+bing_pos <- all_tidy_sentiment[all_tidy_sentiment$sentiment>0,]
+bing_pos_term <- inner_join(bing_pos, all_terms_bing_words[,-4]) %>%
+  arrange(desc(count))
+
+#subeset negative review
+bing_neg <- all_tidy_sentiment[all_tidy_sentiment$sentiment<0,]
+bing_neg_term <- inner_join(bing_neg, all_terms_bing_words[,-4]) %>%
+  arrange(desc(count))
+
+#plot top 15 positive and negative terms
+bing_pos_plot <- ggplot(
+  bing_pos_term[1:15,], aes(x=reorder(term,-count), count)) +
+  geom_bar(stat = "identity", fill = "light blue") + 
+  theme_gdocs() +
+  theme(axis.text.x = element_text(angle = 90, vjust = -0.1)) + 
+  coord_flip()
+
+bing_neg_plot <- ggplot(
+  bing_neg_term[1:15,], aes(x=reorder(term,-count), count)) +
+  geom_bar(stat = "identity", fill = "red") + 
+  theme_gdocs() +
+  theme(axis.text.x = element_text(angle = 90, vjust = -0.1)) +
+  coord_flip()
+
+grid.arrange(bing_pos_plot, bing_neg_plot, nrow = 1, top = "Frequent Term in Top 15 Positive Review V.S. Negative Review with Bing")
+
+```
+## Plot for common words in both positive and negative comments by using Bing
+```{r}
+bing_com_word <- bing_neg_term[bing_neg_term$term %in% bing_pos_term$term,]%>%
+  arrange(desc(count))
+bing_com_plot <- ggplot(
+  bing_com_word[1:15,], aes(x=reorder(term,-count), count)) +
+  geom_bar(stat = "identity", fill = "#fc9272") + 
+  theme_gdocs() +
+  theme(axis.text.x = element_text(angle = 90, vjust = -0.1)) +
+  ggtitle("15 Most Common Words in Both Pos & Neg Reviews(Bing)")
+  coord_flip()
+bing_com_plot
+```
+
+
+## Pyramid plot by using AFINN
+```{r, warning=FALSE}
+afinn_lex <- get_sentiments("afinn")
+head(afinn_lex,3)
+
+# Join text to lexicon
+all_terms_afinn_words <- inner_join(all_tidy, afinn_lex, by = c("term" = "word"))
+
+head(all_terms_afinn_words,3)
+
+#aggregate
+all_tidy_sentiment2_agg <- all_terms_afinn_words %>% 
+  # Group by document
+  group_by(document) %>%
+  # Sum scores by document
+  summarize(total_score = sum(score)) %>%
+  ungroup()
+
+head(all_tidy_sentiment2_agg,3)
+
+# Add polarity
+all_tidy_pol2 <- all_tidy_sentiment2_agg %>% 
+  mutate(
+    pol = ifelse(total_score>0, "positive", "negative")
+  )
+
+#subset top 1positive comments
+afinn_pos <- all_tidy_pol2[all_tidy_pol2$pol=="positive",] 
+
+afinn_pos_term <- inner_join(afinn_pos, all_terms_afinn_words) %>%
+  arrange(desc(count))
+
+#subset negative comments
+afinn_neg <- all_tidy_pol2[all_tidy_pol2$pol=="negative",]
+
+afinn_neg_term <- inner_join(afinn_neg, all_terms_afinn_words) %>%
+  arrange(desc(count))
+
+#plot top 15 positive and negative terms
+afinn_pos_plot <- ggplot(
+  afinn_pos_term[1:15,], aes(x=reorder(term,-count), count)) +
+  geom_bar(stat = "identity", fill = "light blue") + 
+  theme_gdocs() +
+  theme(axis.text.x = element_text(angle = 90, vjust = -0.1)) + 
+  coord_flip()
+
+afinn_neg_plot <- ggplot(
+  afinn_neg_term[1:15,], aes(x=reorder(term,-count), count)) +
+  geom_bar(stat = "identity", fill = "red") + 
+  theme_gdocs() +
+  theme(axis.text.x = element_text(angle = 90, vjust = -0.1)) +
+  coord_flip()
+
+grid.arrange(afinn_pos_plot, afinn_neg_plot, nrow = 1, top = "Frequent Term in Top 15 Positive Review V.S. Negative Review with AFINN")
+
+```
+## Plot for common words in both positive and negative comments by using AFINN
+```{r}
+com_word_afinn <- afinn_neg_term[afinn_neg_term$term %in% afinn_pos_term$term,]%>%
+  arrange(desc(count))
+afinn_com_plot <- ggplot(
+  com_word_afinn[1:15,], aes(x=reorder(term,-count), count)) +
+  geom_bar(stat = "identity", fill = "#756bb1") + 
+  theme_gdocs() +
+  theme(axis.text.x = element_text(angle = 90, vjust = -0.1)) +
+  ggtitle("15 Most Common Words in Both Pos & Neg Reviews(AFINN)")
+  coord_flip()
+afinn_com_plot
+```
+
+
+## Word Cloud by Bing
+```{r, warning=FALSE}
+bing_term_pos <- paste(bing_pos_term$term, collapse = " ")
+bing_term_neg <- paste(bing_neg_term$term, collapse = " ")
+
+term_m <-matrix(c(bing_term_pos,bing_term_neg),1,2)
+a_corpus <- VCorpus(VectorSource(term_m))
+
+a_tdm <- TermDocumentMatrix(a_corpus)
+
+a_tdm_m <- as.matrix(a_tdm)
+
+colnames(a_tdm_m) <- c("positive", "negative")
+
+comparison.cloud(
+  a_tdm_m, 
+  max.words = 100,
+  colors = c("darkblue", "darkred")
+)
+
+```
